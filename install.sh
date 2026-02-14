@@ -69,6 +69,7 @@ trap restore_terminal EXIT
 # Парсинг аргументов
 CREATE_SERVICE=false
 START_SERVICE=false
+SIMPLE_START=false
 for arg in "$@"; do
     case $arg in
         --service)
@@ -77,6 +78,10 @@ for arg in "$@"; do
             ;;
         --start)
             START_SERVICE=true
+            shift
+            ;;
+        --simple-start)
+            SIMPLE_START=true
             shift
             ;;
         *)
@@ -362,9 +367,9 @@ fi
 
 source .venv/bin/activate
 
-# Запуск с флагами --listen 0.0.0.0 --port 8188
+# Запуск с флагами --listen 0.0.0.0 --port 8188 --use-sage-attention
 # Дополнительные аргументы командной строки (например, --cpu) будут переданы дальше
-python main.py --listen 0.0.0.0 --port 8188 "\$@"
+python main.py --listen 0.0.0.0 --port 8188 --use-sage-attention "\$@"
 EOF
 
 chmod +x "$RUN_SCRIPT"
@@ -418,5 +423,11 @@ update_status $TOTAL_STAGES "Установка завершена!"
 info "Установка успешно завершена!"
 info "Для запуска ComfyUI используйте: $RUN_SCRIPT"
 info "Или активируйте окружение вручную: cd ~/ComfyUI && source .venv/bin/activate && python main.py"
+
+# Запуск run_comfyui.sh если указан --simple-start
+if [ "$SIMPLE_START" = true ]; then
+    info "Запуск ComfyUI..."
+    exec "$RUN_SCRIPT"
+fi
 
 # trap restore_terminal выполнится автоматически при выходе

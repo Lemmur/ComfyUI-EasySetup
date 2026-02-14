@@ -18,6 +18,11 @@ wget -qO- https://raw.githubusercontent.com/Lemmur/ComfyUI-EasySetup/main/instal
 
 ### С опциями
 
+**Установка с автоматическим запуском ComfyUI:**
+```bash
+curl -fsSL https://raw.githubusercontent.com/Lemmur/ComfyUI-EasySetup/main/install.sh | bash -s -- --simple-start
+```
+
 **Создать systemd сервис:**
 ```bash
 curl -fsSL https://raw.githubusercontent.com/Lemmur/ComfyUI-EasySetup/main/install.sh | bash -s -- --service
@@ -38,8 +43,9 @@ curl -fsSL https://raw.githubusercontent.com/Lemmur/ComfyUI-EasySetup/main/insta
 
 | Опция | Описание |
 |-------|----------|
+| `--simple-start` | Запустить ComfyUI сразу после установки (без systemd) |
 | `--service` | Создать systemd сервис для автозапуска |
-| `--start` | Запустить ComfyUI сразу после установки |
+| `--start` | Запустить ComfyUI сразу после установки (требует --service) |
 
 ## 📝 Что делает скрипт
 
@@ -47,8 +53,12 @@ curl -fsSL https://raw.githubusercontent.com/Lemmur/ComfyUI-EasySetup/main/insta
 2. Устанавливает драйвер NVIDIA (если требуется)
 3. Создаёт виртуальное окружение Python
 4. Клонирует репозиторий ComfyUI
-5. Устанавливает зависимости
-6. (опционально) Создаёт systemd сервис
+5. Устанавливает кастомные ноды (ComfyUI-Manager, ComfyUI-Downloader, Civicomfy, ComfyUI-Crystools)
+6. Устанавливает CUDA Toolkit 13.0
+7. Устанавливает PyTorch 2.9.1 с поддержкой CUDA 13.0
+8. Сборка и установка SageAttention v2.2.0
+9. Создаёт скрипт запуска `~/run_comfyui.sh` с флагом `--use-sage-attention`
+10. (опционально) Создаёт systemd сервис
 
 ## ⚠️ Важно
 
