@@ -1,0 +1,2 @@
+01:00.0 VGA compatible controller [0300]: NVIDIA Corporation AD103 [GeForce RTX 4080 SUPER] [10de:2702] (rev a1)
+01:00.1 Audio device [0403]: NVIDIA Corporation Device [10de:22bb] (rev a1)

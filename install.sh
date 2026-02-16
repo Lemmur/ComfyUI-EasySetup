@@ -2,7 +2,7 @@
 
 set -euo pipefail
 
-# Цветной вывод (для информационных сообщений)
+# Цветной вывод
 GREEN='\033[0;32m'
 YELLOW='\033[0;33m'
 RED='\033[0;31m'
@@ -11,60 +11,6 @@ NC='\033[0m'
 info()  { echo -e "${GREEN}[INFO]${NC} $1"; }
 warn()  { echo -e "${YELLOW}[WARN]${NC} $1"; }
 error() { echo -e "${RED}[ERROR]${NC} $1"; exit 1; }
-
-# Настройка цвета для статусной строки (через tput для совместимости)
-GREEN_TPUT=$(tput setaf 2)
-RESET_TPUT=$(tput sgr0)
-
-# Глобальные переменные для статуса
-TOTAL_STAGES=0
-CURRENT_STAGE=0
-
-# Функция инициализации фиксированной статусной области
-setup_status_line() {
-    tput civis  # скрыть курсор
-    tput clear
-    # Устанавливаем область прокрутки с 3-й строки (после двух строк статуса)
-    local lines=$(tput lines)
-    tput csr 2 $((lines-1))
-    # Оставляем две строки для статуса
-    tput cup 0 0
-    # Первая строка статуса будет заполняться позже
-    # Вторая строка — разделитель
-    tput cup 1 0
-    printf "${GREEN_TPUT}%*s${RESET_TPUT}\n" $(tput cols) | tr ' ' '-'
-    tput cup 2 0
-}
-
-# Функция обновления статусной строки
-update_status() {
-    local stage_num=$1
-    local description=$2
-    CURRENT_STAGE=$stage_num
-    # Сохраняем текущую позицию курсора
-    tput sc
-    # Переходим в начало первой строки, очищаем её и выводим новый статус
-    tput cup 0 0
-    tput el
-    printf "${GREEN_TPUT}[%d/%d] %s${RESET_TPUT}\n" $stage_num $TOTAL_STAGES "$description"
-    # Обновляем разделитель (на случай изменения ширины терминала)
-    tput cup 1 0
-    tput el
-    printf "${GREEN_TPUT}%*s${RESET_TPUT}\n" $(tput cols) | tr ' ' '-'
-    # Восстанавливаем позицию курсора
-    tput rc
-}
-
-# Функция восстановления терминала при выходе
-restore_terminal() {
-    tput cnorm  # показать курсор
-    tput csr 0 $(tput lines)  # сброс области прокрутки
-    tput cup $(tput lines) 0  # перейти в конец
-    clear
-}
-
-# Устанавливаем ловушку для восстановления терминала при выходе
-trap restore_terminal EXIT
 
 # Парсинг аргументов
 CREATE_SERVICE=false
@@ -85,31 +31,33 @@ for arg in "$@"; do
             shift
             ;;
         *)
-            # Неизвестный аргумент
             ;;
     esac
 done
-
-# Определяем общее количество этапов
-if [ "$CREATE_SERVICE" = true ]; then
-    TOTAL_STAGES=9
-else
-    TOTAL_STAGES=8
-fi
 
 # Проверка прав sudo
 if ! sudo -v; then
     error "Не удалось получить sudo. Скрипт требует прав суперпользователя."
 fi
 
-# Определяем имя реального пользователя (если скрипт запущен через sudo)
+# Определяем имя реального пользователя
 REAL_USER=${SUDO_USER:-$USER}
 REAL_HOME=$(eval echo ~$REAL_USER)
 
-# Инициализация строки состояния
-setup_status_line
+# ----------------------------------------------------------------------
+# Этап 1: Обновление списка пакетов и установка базовых пакетов
+# ----------------------------------------------------------------------
+info "Обновление пакетов..."
+sudo apt update
+sudo apt autoremove -y
+sudo apt install -y python3 python3-pip python3-venv git wget software-properties-common pciutils ffmpeg
 
-# Функция определения модели GPU через lspci (до установки драйвера)
+# ----------------------------------------------------------------------
+# Этап 2: Проверка/установка драйвера NVIDIA
+# ----------------------------------------------------------------------
+info "Проверка драйвера NVIDIA..."
+
+# Функция определения модели GPU через lspci
 detect_gpu_model() {
     if ! command -v lspci &> /dev/null; then
         sudo apt install -y pciutils
@@ -119,7 +67,6 @@ detect_gpu_model() {
     if [[ -z "$gpu_info" ]]; then
         echo ""
     else
-        # Пытаемся извлечь название модели (обычно после контроллера)
         echo "$gpu_info" | sed -E 's/.*: (.*) \(.*/\1/' | sed 's/ *$//'
     fi
 }
@@ -127,14 +74,13 @@ detect_gpu_model() {
 # Функция проверки совместимости драйвера с CUDA 13
 check_nvidia_driver() {
     if ! command -v nvidia-smi &> /dev/null; then
-        return 1  # драйвер не установлен
+        return 1
     fi
     local driver_version
     driver_version=$(nvidia-smi --query-gpu=driver_version --format=csv,noheader | head -n1)
     if [[ -z "$driver_version" ]]; then
         return 1
     fi
-    # Минимальная версия для CUDA 13.0: 525.60.13
     if [[ "$(echo "$driver_version" | cut -d. -f1)" -ge 525 ]]; then
         return 0
     else
@@ -143,19 +89,6 @@ check_nvidia_driver() {
     fi
 }
 
-# ----------------------------------------------------------------------
-# Этап 1: Обновление списка пакетов и установка базовых пакетов
-# ----------------------------------------------------------------------
-update_status 1 "Обновление пакетов"
-info "Обновление списка пакетов и установка базовых утилит..."
-sudo apt update
-sudo apt autoremove -y
-sudo apt install -y python3 python3-pip python3-venv git wget software-properties-common pciutils ffmpeg
-
-# ----------------------------------------------------------------------
-# Этап 2: Проверка/установка драйвера NVIDIA
-# ----------------------------------------------------------------------
-update_status 2 "Проверка драйвера NVIDIA"
 if check_nvidia_driver; then
     info "Драйвер NVIDIA уже установлен и совместим с CUDA 13. Пропускаем этап установки драйвера."
 else
@@ -185,8 +118,7 @@ else
     sudo add-apt-repository -y restricted
     sudo add-apt-repository -y multiverse
 
-    update_status 2 "Установка драйвера $DRIVER_PACKAGE (требуется перезагрузка)"
-    info "Установка драйвера $DRIVER_PACKAGE..."
+    info "Установка драйвера $DRIVER_PACKAGE (требуется перезагрузка)..."
     sudo apt install -y "$DRIVER_PACKAGE"
 
     warn "Драйвер установлен. Необходимо перезагрузить систему для загрузки модулей ядра."
@@ -194,7 +126,6 @@ else
     
     read -rp "Перезагрузить сейчас? (y/N): " choice
     if [[ "$choice" =~ ^[Yy]$ ]]; then
-        # trap восстановит терминал перед выходом
         exit 0
     else
         error "Перезагрузка обязательна. Запустите скрипт после перезагрузки."
@@ -207,7 +138,7 @@ nvidia-smi
 # ----------------------------------------------------------------------
 # Этап 3: Клонирование ComfyUI и создание виртуального окружения
 # ----------------------------------------------------------------------
-update_status 3 "Клонирование ComfyUI"
+info "Клонирование ComfyUI..."
 COMFYUI_DIR="$REAL_HOME/ComfyUI"
 if [ -d "$COMFYUI_DIR" ]; then
     warn "Директория $COMFYUI_DIR уже существует. Используем её."
@@ -230,7 +161,7 @@ pip install -r requirements.txt
 # ----------------------------------------------------------------------
 # Этап 4: Установка кастомных нод (параллельно)
 # ----------------------------------------------------------------------
-update_status 4 "Установка кастомных нод"
+info "Установка кастомных нод..."
 CUSTOM_NODES_DIR="$COMFYUI_DIR/custom_nodes"
 mkdir -p "$CUSTOM_NODES_DIR"
 cd "$CUSTOM_NODES_DIR"
@@ -262,7 +193,6 @@ info "Установка зависимостей кастомных нод..."
 cd "$COMFYUI_DIR"
 source .venv/bin/activate
 
-# Функция установки зависимостей для кастомной ноды
 install_custom_node_deps() {
     local node_dir=$1
     local node_name=$(basename "$node_dir")
@@ -272,14 +202,12 @@ install_custom_node_deps() {
         pip install -r "$node_dir/requirements.txt" || warn "Не удалось установить зависимости для $node_name"
     fi
     
-    # Проверяем наличие setup.py или pyproject.toml для установки
     if [ -f "$node_dir/setup.py" ] || [ -f "$node_dir/pyproject.toml" ]; then
         info "Установка $node_name через pip install -e..."
         pip install -e "$node_dir" || warn "Не удалось установить $node_name"
     fi
 }
 
-# Установка зависимостей для каждой кастомной ноды
 for node_dir in "$CUSTOM_NODES_DIR"/*; do
     if [ -d "$node_dir" ]; then
         install_custom_node_deps "$node_dir"
@@ -289,7 +217,7 @@ done
 # ----------------------------------------------------------------------
 # Этап 5: Установка CUDA Toolkit 13.0
 # ----------------------------------------------------------------------
-update_status 5 "Установка CUDA 13"
+info "Установка CUDA 13..."
 info "Установка CUDA Toolkit 13.0 из репозитория NVIDIA..."
 cd /tmp
 if [ ! -f "cuda-keyring_1.1-1_all.deb" ]; then
@@ -299,24 +227,20 @@ sudo dpkg -i cuda-keyring_1.1-1_all.deb
 sudo apt update
 sudo apt install -y cuda-toolkit-13-0
 
-# Экспорт путей НЕ выполняется
-
 # ----------------------------------------------------------------------
 # Этап 6: Установка PyTorch для CUDA 13.0
 # ----------------------------------------------------------------------
-update_status 6 "Установка PyTorch"
+info "Установка PyTorch..."
 cd "$COMFYUI_DIR"
 source .venv/bin/activate
 
 info "Установка PyTorch 2.9.1 с поддержкой CUDA 13.0..."
 pip install torch==2.9.1 torchvision==0.24.1 torchaudio==2.9.1 --index-url https://download.pytorch.org/whl/cu130
 
-# Triton не устанавливаем явно
-
 # ----------------------------------------------------------------------
 # Этап 7: Сборка и установка SageAttention из исходников
 # ----------------------------------------------------------------------
-update_status 7 "Сборка SageAttention"
+info "Сборка SageAttention..."
 info "Клонирование репозитория SageAttention..."
 cd "$COMFYUI_DIR"
 if [ ! -d "SageAttention" ]; then
@@ -343,9 +267,8 @@ python setup.py install
 # ----------------------------------------------------------------------
 # Этап 8: Создание скрипта запуска run_comfyui.sh в домашней папке
 # ----------------------------------------------------------------------
-update_status 8 "Создание скрипта запуска"
+info "Создание скрипта запуска..."
 RUN_SCRIPT="$REAL_HOME/run_comfyui.sh"
-info "Создание скрипта запуска $RUN_SCRIPT..."
 
 cat > "$RUN_SCRIPT" << EOF
 #!/usr/bin/env bash
@@ -368,7 +291,6 @@ fi
 source .venv/bin/activate
 
 # Запуск с флагами --listen 0.0.0.0 --port 8188 --use-sage-attention
-# Дополнительные аргументы командной строки (например, --cpu) будут переданы дальше
 python main.py --listen 0.0.0.0 --port 8188 --use-sage-attention "\$@"
 EOF
 
@@ -380,8 +302,7 @@ info "Скрипт запуска создан: $RUN_SCRIPT"
 # Этап 9: Создание systemd-сервиса (если указан --service)
 # ----------------------------------------------------------------------
 if [ "$CREATE_SERVICE" = true ]; then
-    update_status 9 "Создание systemd-сервиса"
-    info "Создание systemd-сервиса для автозапуска ComfyUI..."
+    info "Создание systemd-сервиса..."
 
     SERVICE_FILE="/etc/systemd/system/comfyui.service"
     sudo bash -c "cat > $SERVICE_FILE" <<EOF
@@ -419,7 +340,6 @@ fi
 # ----------------------------------------------------------------------
 # Завершение
 # ----------------------------------------------------------------------
-update_status $TOTAL_STAGES "Установка завершена!"
 info "Установка успешно завершена!"
 info "Для запуска ComfyUI используйте: $RUN_SCRIPT"
 info "Или активируйте окружение вручную: cd ~/ComfyUI && source .venv/bin/activate && python main.py"
@@ -429,5 +349,3 @@ if [ "$SIMPLE_START" = true ]; then
     info "Запуск ComfyUI..."
     exec "$RUN_SCRIPT"
 fi
-
-# trap restore_terminal выполнится автоматически при выходе
